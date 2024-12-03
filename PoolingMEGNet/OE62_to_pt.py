@@ -66,21 +66,4 @@ if __name__ == "__main__":
     lumos = unoccupied_levels.apply(lambda x: x[0])
     gaps = np.array(lumos - homos)
 
-    # OE62_to_pt(molecules, gaps)
-
-    # Get refcodes from split file
-    S = np.load(split_file)
-    train_codes = S["train"]
-    valid_codes = S["valid"]
-    test_codes = S["test"]
-
-    # Get indexes of refcodes
-    codes = df_62k['refcode_csd']
-    train_idx = np.where(np.isin(codes, train_codes))[0]
-    valid_idx = np.where(np.isin(codes, valid_codes))[0]
-    test_idx = np.where(np.isin(codes, test_codes))[0]
-
-    # Create structure and target splits
-    OE62_to_pt(molecules[train_idx], gaps[train_idx], "train.pt")
-    OE62_to_pt(molecules[valid_idx], gaps[valid_idx], "val.pt")
-    OE62_to_pt(molecules[test_idx], gaps[test_idx], "test.pt")
+    OE62_to_pt(molecules, gaps)

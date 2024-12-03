@@ -218,24 +218,34 @@ class MEGNetBlock(nn.Module):
     
 
 class ScaledDotProductAttention(nn.Module):
-    def __init__(self, d_k):
+    def __init__(self, d_k, num_heads):
         super(ScaledDotProductAttention, self).__init__()
         self.d_k = d_k
+        self.num_heads = num_heads
 
-    def forward(self, query, key, value, mask=None):
-        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.d_k)
+    def forward(self, global_query, local_key, local_value, batch, mask=None):
+        batch_size, num_edges = global_query.shape[1], local_key.shape[1]
+
+        scores = torch.zeros(self.num_heads, batch_size, num_edges)
+        for i in range(batch_size):
+            scores[:, i, batch == i] = torch.matmul(global_query[:, i, :].unsqueeze(1), local_key[:, batch == i, :].transpose(-2, -1)).squeeze(1)
+            
+        # scores = torch.matmul(global_query, local_key.transpose(-2, -1)) / math.sqrt(self.d_k)
 
         if mask is not None:
             scores = scores.masked_fill(mask == 0, -1e9)
 
-        attn = torch.softmax(scores, dim=-1)
-        output = torch.matmul(attn, value)
+        attn = torch.zeros_like(scores)
+        for i in range(batch_size):
+            attn[:, i, batch == i] = torch.softmax(scores[:, i, batch == i], dim=-1)
+        # attn = torch.softmax(scores, dim=-1)
+        output = torch.matmul(attn, local_value)
 
         return output, attn
     
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, n_2, num_heads = 1):
+    def __init__(self, n_2, num_heads):
         super(MultiHeadAttention, self).__init__()
         assert n_2 % num_heads == 0
 
@@ -248,16 +258,16 @@ class MultiHeadAttention(nn.Module):
         self.value = nn.Linear(n_2, n_2)
         self.out = nn.Linear(n_2, n_2)
 
-        self.attention = ScaledDotProductAttention(self.d_k)
+        self.attention = ScaledDotProductAttention(self.d_k, self.num_heads)
 
-    def forward(self, query, key, value, mask = None):
+    def forward(self, global_query, local_key, local_value, batch, mask = None):
         # Linear projections
-        query = self.query(query).view(-1, self.num_heads, self.d_k).transpose(0, 1)
-        key = self.key(key).view(-1, self.num_heads, self.d_k).transpose(0, 1)
-        value = self.value(value).view(-1, self.num_heads, self.d_k).transpose(0, 1)
+        global_query = self.query(global_query).view(-1, self.num_heads, self.d_k).transpose(0, 1)
+        local_key = self.key(local_key).view(-1, self.num_heads, self.d_k).transpose(0, 1)
+        local_value = self.value(local_value).view(-1, self.num_heads, self.d_k).transpose(0, 1)
 
         # Apply attention
-        x, attn = self.attention(query, key, value, mask)
+        x, attn = self.attention(global_query, local_key, local_value, batch, mask)
 
         # Concatenate heads
         x = x.transpose(0, 1).contiguous().view(-1, self.n_2)
@@ -269,18 +279,16 @@ class MultiHeadAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, n_2, num_heads, dropout=0.1):
+    def __init__(self, n_2, num_heads, dropout = 0.1):
         super(TransformerBlock, self).__init__()
         self.attention = MultiHeadAttention(n_2, num_heads)
-        self.norm1 = nn.LayerNorm(n_2)
-        self.norm2 = nn.LayerNorm(n_2)
+        self.norm = nn.LayerNorm(n_2)
 
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, global_features, local_features, batch, mask = None):
-        assert len(torch.unique(batch)) == 1, "The current transformer block only applies to a single graph"
-        attn_output, _ = self.attention(global_features, local_features, local_features, mask)
-        global_features = self.norm1(global_features + self.dropout(attn_output))
+        attn_output, _ = self.attention(global_features, local_features, local_features, batch, mask)
+        global_features = self.norm(global_features + self.dropout(attn_output))
         return global_features
 
 

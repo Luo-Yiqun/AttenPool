@@ -49,9 +49,11 @@ class MEGNet(torch.nn.Module):
                  n2 : int = 32,
                  n3 : int = 16,
                  n_blocks: int = 2,
+                 pooling: str = "TransformerBlock",
+                 num_heads: int = 4,
+                 dropout: float = 0.1,
                  is_undirected: bool = False,
                  residual_connection: bool = True,
-                 pooling: str = "TransformerBlock",
                  mode: str = 'regression',
                  n_classes: int = 2,
                  n_tasks: int = 1):
@@ -134,8 +136,8 @@ class MEGNet(torch.nn.Module):
 
         assert self.pooling in ("global_mean_pool", "global_add_pool", "global_max_pool", "TransformerBlock", "Set2Set")
         if self.pooling == "TransformerBlock":
-            self.pooling_nodes = TransformerBlock(n_2 = self.n2, num_heads = 4)
-            self.pooling_edges = TransformerBlock(n_2 = self.n2, num_heads = 4)
+            self.pooling_nodes = TransformerBlock(n_2 = self.n2, num_heads = num_heads, dropout = dropout)
+            self.pooling_edges = TransformerBlock(n_2 = self.n2, num_heads = num_heads, dropout = dropout)
             in_size = 3 * n2
         elif self.pooling == "Set2Set":
             self.set2set_nodes = Set2Set(in_channels = n2, processing_steps = 3, num_layers = 1)
@@ -187,7 +189,7 @@ class MEGNet(torch.nn.Module):
 
         if self.pooling == "TransformerBlock":
             node_out = self.pooling_nodes(global_features, node_features, batch)
-            edge_out = self.pooling_edges(global_features, edge_features, batch)
+            edge_out = self.pooling_edges(global_features, edge_features, batch[edge_index[0]])
             out = torch.cat([node_out, edge_out, global_features], axis = 1)
         elif self.pooling == "Set2Set":
             node_features = self.set2set_nodes(node_features, batch)
